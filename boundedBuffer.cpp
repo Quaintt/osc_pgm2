@@ -24,33 +24,45 @@ Producer executes 1,000,000 times.
 Normal exit after all items are consumed. Everything needs to be cleaned up before terminating.
 Must use linux semaphores.
 */
+
+/*
+Using the VM for Ubuntu 20.04 LTS from Pgm1, write a C/C++ program which simulates the Producer/Consumer 
+program in Figure 5.16 with a buffer size of s thousand. Allow the Producer to generate s million 
+items. Use ten consumers. The program needs to perform a normal exit process after all items are 
+consumed. Both the Producer (singular) and Consumers are to be runs as separate processes generated via 
+fork(). The program must us Linux semaphores. The program must clean up the semaphores used and zombies 
+created before termination. Report the number of items that each consumer obtained. Do the counts meet 
+expectations?
+*/
+
 const int sizeOfBuffer = 1;
 const int totalItems = 50;
-//sem_t s = 1, n = 0, cmdNum = sizeofbuffer;
-sem_t one, n, cmdNum;
+//sem_t s = 1, n = 0, e = sizeofbuffer;
+sem_t s, n, e;
 
 void produ()
 {
     pid_t pid = getpid();
     for (int x = 0; x < totalItems; x++)
     {
-        //what does produce() do?
         printf(BLU "[produ]\t" RESET "waiting...\n");
-        sem_wait(&cmdNum);
-        sem_wait(&one);
-        //sleep(1);
+        sem_wait(&e);
+        sem_wait(&s);
+        sleep(0.1);
         //append();
 
         int value1, value2, value3; 
-        sem_getvalue(&one, &value1);
+        sem_getvalue(&s, &value1);
         sem_getvalue(&n, &value2);
-        sem_getvalue(&cmdNum, &value3);
-        printf(BLU "[produ]\t" CYN "One: %d N: %d cmdNum: %d\n" RESET, value1, value2, value3);
+        sem_getvalue(&e, &value3);
+        printf(BLU "[produ]\t" CYN "Sending... One: %d N: %d e: %d\n" RESET, value1, value2, value3);
 
-        sem_post(&one);
+        sem_post(&s);
         sem_post(&n);
         //printf(BLU "[produ]\t" RESET "sent.\n");
     }
+
+    return;
     /*
     for (int p = 8; p >= 0; p--){
         kill(pid + p, SIGKILL);
@@ -59,36 +71,46 @@ void produ()
    //kill(pid, SIGKILL);
 }
 
-void consu()
+int consu()
 {
     pid_t pid = getpid();
+    int obtained = 1;
     bool isOneMillion = false;
     while (!isOneMillion)
     {
         //printf(GRN "[consu %d]\t" RESET "waiting...\n", pid);
-        //sem_wait(&cmdNum);
-        //sem_wait(&one);
-        if (sem_wait(&cmdNum) != 0 || sem_wait(&one) != 0){
+        //sem_wait(&e);
+        //sem_wait(&s);
+        if (sem_wait(&e) != 0 || sem_wait(&s) != 0){
             printf(GRN "[consu %d]\t" RESET "waiting...\n", pid);
         }
-        //sleep(1);
-        sem_post(&one);
+        //sleep(0.05);
+        sem_post(&s);
         sem_post(&n);
-        printf(GRN "[consu %d]\t" RESET "...recieved\n", pid);
-        int value2; 
+        
+        int value1, value2, value3; 
+        sem_getvalue(&s, &value1);
         sem_getvalue(&n, &value2);
+        sem_getvalue(&e, &value3);
+        //printf(GRN "[consu %d]\t" RESET "...recieved", pid);
+        //printf(CYN "\tOne: %d N: %d e: %d\n" RESET, value1, value2, value3);
+
+        obtained++;
         if(value2 >= totalItems) isOneMillion = true;
         //if(!isOneMillion){isOneMillion = true;}
     }
+    return obtained;
 }
 
 void spawnConsumers(int c){ //creates c + 2 consumers???
+    /*
     if (fork() == 0)
     {
         //child
         pid_t pid = getpid();
         printf(RED "Created new Consumer! ~ PID: %d\n" RESET, pid);
-        consu();
+        int output = consu();
+        printf("Consumer " RED "%d" RESET " ended. Total items obtained: " RED "%d\n" RESET, pid, output);
     }
     else{
         //parent
@@ -98,45 +120,69 @@ void spawnConsumers(int c){ //creates c + 2 consumers???
             spawnConsumers(c);
         }
     }
+    */
+
+    for (c; c > 0; c--){
+        pid_t pid = fork();
+        if (pid == 0) { //child
+            pid = getpid();
+            printf(RED "Created Consumer %d! ~ PID: %d\n" RESET, c, pid);
+            int output = consu();
+            printf("Consumer " RED "%d" RESET " ended. Total items obtained: " RED "%d\n" RESET, pid, output);
+            break;
+        }
+        else if (pid < 0){ //error?
+            //unlink semaphore
+            //close semaphore
+        }
+    }
 }
 
 int main()
 {
-    sem_init(&one, 0, sizeOfBuffer);
-    sem_init(&n, 0, 1);
-    sem_init(&cmdNum, 0, totalItems);
+    sem_init(&s, 0, 1); //enforces mutual exclusion
+    sem_init(&n, 0, sizeOfBuffer); //size of buffer
+    sem_init(&e, 0, totalItems); //tracks empty spaces
+
+    
     if (fork() == 0)
     {
         //child
         pid_t pid = getpid();
         printf(RED "Created original Consumer! ~ PID: %d\n" RESET, pid);
-        spawnConsumers(8);
+        spawnConsumers(10);
         printf(RED "Parent finished loop! ~ PID: %d\n" RESET, pid);
         //kill(pid, SIGKILL);
+        kill(getpid(), SIGTERM);
+        return 2;
     }
     else
     {
         //parent
         pid_t pid = getpid();
         printf("Created Producer! ~ PID: %d\n", pid);
-        sleep(1);
+        sleep(0.2);
         produ();
-        sem_destroy(&one);
+        sem_destroy(&s);
         sem_destroy(&n);
-        sem_destroy(&cmdNum);
+        sem_destroy(&e);
+        kill(getpid(), SIGTERM);
+        return 0;
     }
     printf("yo.\n");
     kill(getpid(), SIGTERM);
+    return 1;
 }
+
 
 /*
 const int sizeOfBuffer = 1000;
-semaphore s = 1, n = 0, cmdNum = sizeofbuffer;
+semaphore s = 1, n = 0, e = sizeofbuffer;
 
 void producer(){
     while (true){
         produce();
-        semWait(cmdNum);
+        semWait(e);
         semWait(s);
         append();
         semSignal(s);
@@ -150,7 +196,7 @@ void consumer(){
         semWait(s);
         take();
         semSignal(s);
-        semSignal(cmdNum);
+        semSignal(e);
         consume();
     }
 }
