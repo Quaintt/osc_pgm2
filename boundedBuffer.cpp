@@ -31,7 +31,7 @@ Must use linux semaphores.
 
 /*
 Using the VM for Ubuntu 20.04 LTS from Pgm1, write a C/C++ program which simulates the Producer/Consumer 
-program in Figure 5.16 with a buffer size of s thousand. Allow the Producer to generate s million 
+program in Figure 5.16 with a buffer size of one thousand. Allow the Producer to generate one million 
 items. Use ten consumers. The program needs to perform a normal exit process after all items are 
 consumed. Both the Producer (singular) and Consumers are to be runs as separate processes generated via 
 fork(). The program must us Linux semaphores. The program must clean up the semaphores used and zombies 
