@@ -12,6 +12,8 @@
 #include <sys/mman.h>
 #include <stdlib.h>
 
+#define ITEMS 100000
+
 //colors because ofc.
 #define RED "\x1B[31m"
 #define GRN "\x1B[32m"
@@ -25,36 +27,41 @@
 int pid[12];
 const char ledger[] = "ledger";
 sem_t sem1, sem2;
-struct mem* hell;
+struct mem *hell; //TODO: Rename dumb var names
+const int totalItemsProduced = ITEMS;
 //pid_t pid;
 
 void spawnProcesses(int processes); //Forward declaration so the compiler doesn't scream at me.
 
 struct mem
 {
-    int actionsPerformed;
-    sem_t s1;
-    sem_t s2;
+    sem_t bufferReady;
+    sem_t mSpaceReady;
+    sem_t accessReady;
+
+    sem_t totalActionsPerformed;
+    sem_t itemsAvailable;
+
     size_t bytes_in_buffer;
-    char buffer[1000]; //I'm just assuming he ment 1000 bytes and not 1000 items...
+    char buffer[ITEMS]; //I'm just assuming he ment 1000 bytes and not 1000 items...
 };
 
 int main()
 {
     // init data
-    // init semaphores
-      
     int fileDescriptor = shm_open("ledger", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR); //not sure what S_IRUSR or S_IWUSR do
     off_t structSize = sizeof(mem);
-    //off_t structSize = 2*sysconf(_SC_PAGE_SIZE);
     ftruncate(fileDescriptor, structSize);
-    mem* gamer = (mem*)mmap(NULL, structSize, PROT_READ | PROT_WRITE, MAP_SHARED, fileDescriptor, 0);
-    if(gamer == MAP_FAILED) printf("mmap error code: %d \n",errno);
-    sem_init(&(gamer->s1), 1, 0);
-    sem_init(&(gamer->s2), 1, 0);
+    mem *gamer = (mem *)mmap(NULL, structSize, PROT_READ | PROT_WRITE, MAP_SHARED, fileDescriptor, 0);
+    if (gamer == MAP_FAILED)
+        printf("mmap error code: %d \n", errno);
 
-    //addr = (char*)mmap(NULL, structSize, PROT_READ | PROT_WRITE, MAP_SHARED, fileDescriptor, 0);
-    //if(addr == MAP_FAILED) printf("fuck %d \n",errno);
+    //init semaphores
+    sem_init(&(gamer->bufferReady), 1, 1);
+    sem_init(&(gamer->mSpaceReady), 1, 1000);
+    sem_init(&(gamer->itemsAvailable), 1, 0);
+    sem_init(&(gamer->totalActionsPerformed), 1, 0);
+    sem_init(&(gamer->accessReady), 1, 1);
 
     hell = gamer;
 
@@ -80,64 +87,112 @@ void cleanup()
         }
     }
 
-    //shm_unlink();
+    sem_close(&(hell->bufferReady));
+    sem_close(&(hell->mSpaceReady));
+    sem_close(&(hell->itemsAvailable));
+    sem_close(&(hell->accessReady));
+    sem_close(&(hell->totalActionsPerformed));
+
+    munmap(NULL, sizeof(mem));
+    shm_unlink("ledger");
 
     printf(GRN "~~ cleanup complete ~~\n" RESET);
     exit(EXIT_SUCCESS);
 }
 
-int consumer(char test)
+int consumer(int id)
 {
-    while (true)
+    int actionsPerformed = 0;
+    int itemsRecieved = 0;
+    int item;
+    while (actionsPerformed < totalItemsProduced / 10)
     {
+        //wait until there are items to retrieve
+        //sem_wait(&(hell->itemsAvailable));
+
         //wait untill it's okay to access data
-        sem_wait(&(hell->s1));
+        sem_wait(&(hell->bufferReady));
 
-        //sleep(1);
+        //make sure we haven't completed all items
+        //sem_wait(&(hell->itemsLeft));
+        sleep(0.666);
 
-        //read the data?
-        for(int z = 0; z < hell->bytes_in_buffer; z++){
-            hell->buffer[z] = test;
+        //how many items available?
+        sem_wait(&(hell->itemsAvailable));
+        sem_getvalue(&(hell->itemsAvailable), &item); //TODO: Make this wayyyy better
+        item++;                                       //compensate for the change from the sem_wait
+        itemsRecieved++;                              //add to the items recieved count
+
+        //read and modify(clear) data
+        sem_wait(&(hell->accessReady));
+        //printf(RESET "c%d:" GRN "[%d]%d" RESET, id, (item-1), hell->buffer[item-1]);
+        char k = hell->buffer[item - 1];
+        hell->buffer[item - 1] = id; //if one item available, go to slot zero
+        sem_post(&(hell->accessReady));
+        //printf(RED "[%d]%d" RESET, (item-1), hell->buffer[item-1]);
+        if (k != 63)
+        {
+            //printf(RED "!!! consumer %d ~ buffer[%d]: " RESET, id, (item-1));
+            //printf(RED "Existing Value %d\n" RESET, k);
+            itemsRecieved--; //nullify the most recent item addition
         }
-        //printf("changed data :)\n");
+
+        //update the actions counters
+        actionsPerformed += 1;
 
         //tell producer that data has been changed
-        sem_post(&(hell->s2));
+        sem_post(&(hell->mSpaceReady));
 
+        //sleep(0.4); //aims to prevent the same consumer from reciving 2 items in a row
     }
+    return itemsRecieved;
 }
 
 void producer()
 {
-    int fileDescriptor = shm_open("ledger", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR); 
-    off_t structSize = sizeof(mem);
-    ftruncate(fileDescriptor, structSize);
-    mem* prodMemLink = (mem*)mmap(NULL, structSize, PROT_READ | PROT_WRITE, MAP_SHARED, fileDescriptor, 0);
-    if(prodMemLink == MAP_FAILED) printf("mmap error code: %d \n",errno);
-    char message[] = "?";
-    
-    while (true)
+    int itemsProduced = 0;
+    int offset = 0;
+    char message[ITEMS];
+
+    for (int x = 0; x < ITEMS; x++)
     {
+        message[x] = '?';
+    }
+
+    while (itemsProduced < totalItemsProduced)
+    {
+        //wait for space in memory to be cleared up?
+        sem_wait(&(hell->mSpaceReady));
+
+        sem_getvalue(&(hell->mSpaceReady), &offset);
+        //offset = totalItemsProduced - offset;
+
+        size_t s = offset;
+
         //placing data into shared memory buffer
-        prodMemLink->bytes_in_buffer = strlen(message);
-        memcpy(&prodMemLink->buffer, message, strlen(message));
+        sem_wait(&(hell->accessReady)); //only one thing can write to mem at a time
+        memcpy(&hell->buffer, message, strlen(message) - offset);
+        //memset(&hell->buffer, '?', s);
+        itemsProduced++;
+        sem_post(&(hell->accessReady));
+
+        //increase the amount of items available
+        sem_post(&(hell->itemsAvailable));
+        int output_text;
+        sem_getvalue(&(hell->itemsAvailable), &output_text);
+        // printf(RESET "ItmAvl: %d  ", output_text);
 
         //tell consumer that it is safe to access memory
-        sem_post(&(prodMemLink->s1));
+        sem_post(&(hell->bufferReady));
+        sem_getvalue(&(hell->bufferReady), &output_text);
+        // printf("buffRdy: %d  ", output_text);
 
-        //wait for space in memory to be cleared up?
-        sem_wait(&(prodMemLink->s2));
+        sem_getvalue(&(hell->mSpaceReady), &output_text);
+        // printf("sRdy: %d  ", output_text);
 
-        printf("char at [0]: %d\n", prodMemLink->buffer[0]);
+        // printf("prod: %d  ", itemsProduced);
 
-        sleep(1);
-
-        //make item
-        //check if space in memory
-        //write to memory
-        //indicate that new stuff is in memory
-
-
+        // printf("char at [0]: %d\n", hell->buffer[0]);
     }
 }
 
@@ -151,15 +206,16 @@ void spawnProcesses(int processes) // one process will be the producer, so 11 to
         if (pid[c] == 0 && c == processes) //child and first loop
         {
             producer();
-            printf(RESET "Producer " RED "%d" RESET " ended.\n", c);
+            printf(RESET "Producer " GRN "%d" RESET " ended.\n", c);
             break;
         }
         else if (pid[c] == 0)
         { //child
-            //consider storing the number of the child in the struct??
-            char t = '0' + c;
-            int output = consumer(t);
-            printf(RESET "Consumer " RED "%d" RESET " ended. Total items obtained: " RED "%d\n" RESET, c, output);
+            //char t = '0' + c;
+            int output = consumer(c);
+            double acu = (double)output / ITEMS * 1000;
+            printf(RESET "Consumer " GRN "%d" RESET " ended. Items obtained: " GRN "%d" RESET, c, output);
+            printf(" Accuracy: " GRN "%f%%\n" RESET, acu);
             break;
         }
     }
