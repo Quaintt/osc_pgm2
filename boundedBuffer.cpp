@@ -130,8 +130,8 @@ void spawnConsumers(int c)
     for (c; c > 0; c--)
     {
         //pid_t pid = fork();
-        consu_pid = fork();
-        if (consu_pid == 0)
+        pid_t f = fork();
+        if (f == 0)
         { //child
             pid_t temp_pid = getpid();
             printf(RED "Created Consumer %d! ~ PID: %d\n" RESET, c, temp_pid);
@@ -239,10 +239,10 @@ semaphore s = 1, n = 0, e = sizeofbuffer;
 
 void producer(){
     while (true){
-        produce();
-        semWait(e);
-        semWait(s);
-        append();
+        produce(); //add item to buffer
+        semWait(e); // buffer size -1
+        semWait(s); // empty spaces available
+        append(); //
         semSignal(s);
         semSignal(n);
     }
