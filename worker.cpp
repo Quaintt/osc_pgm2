@@ -12,7 +12,7 @@
 #include <sys/mman.h>
 #include <stdlib.h>
 
-#define ITEMS 100000
+#define ITEMS 1000000
 
 //colors because ofc.
 #define RED "\x1B[31m"
@@ -38,11 +38,10 @@ struct mem
     sem_t bufferReady;
     sem_t mSpaceReady;
     sem_t accessReady;
-
     sem_t totalActionsPerformed;
     sem_t itemsAvailable;
-
     size_t bytes_in_buffer;
+    int bItems;
     char buffer[ITEMS]; //I'm just assuming he ment 1000 bytes and not 1000 items...
 };
 
@@ -62,6 +61,7 @@ int main()
     sem_init(&(gamer->itemsAvailable), 1, 0);
     sem_init(&(gamer->totalActionsPerformed), 1, 0);
     sem_init(&(gamer->accessReady), 1, 1);
+    gamer->bItems = 0;
 
     hell = gamer;
 
@@ -113,27 +113,27 @@ int consumer(int id)
         //wait untill it's okay to access data
         sem_wait(&(hell->bufferReady));
 
-        //make sure we haven't completed all items
-        //sem_wait(&(hell->itemsLeft));
-        sleep(0.666);
+        //sleep(0.666);
 
         //how many items available?
         sem_wait(&(hell->itemsAvailable));
-        sem_getvalue(&(hell->itemsAvailable), &item); //TODO: Make this wayyyy better
-        item++;                                       //compensate for the change from the sem_wait
+        //sem_getvalue(&(hell->itemsAvailable), &item); //TODO: Make this wayyyy better
+        //item++;                                       //compensate for the change from the sem_wait
         itemsRecieved++;                              //add to the items recieved count
-
+        
         //read and modify(clear) data
         sem_wait(&(hell->accessReady));
         //printf(RESET "c%d:" GRN "[%d]%d" RESET, id, (item-1), hell->buffer[item-1]);
+        item = hell->bItems;
         char k = hell->buffer[item - 1];
         hell->buffer[item - 1] = id; //if one item available, go to slot zero
+        hell->bItems -= 1;
         sem_post(&(hell->accessReady));
         //printf(RED "[%d]%d" RESET, (item-1), hell->buffer[item-1]);
         if (k != 63)
         {
-            //printf(RED "!!! consumer %d ~ buffer[%d]: " RESET, id, (item-1));
-            //printf(RED "Existing Value %d\n" RESET, k);
+            printf(RED "!!! consumer %d ~ buffer[%d]: " RESET, id, (item-1));
+            printf(RED "Existing Value %d\n" RESET, k);
             itemsRecieved--; //nullify the most recent item addition
         }
 
@@ -143,7 +143,7 @@ int consumer(int id)
         //tell producer that data has been changed
         sem_post(&(hell->mSpaceReady));
 
-        //sleep(0.4); //aims to prevent the same consumer from reciving 2 items in a row
+        sleep(0.9); //aims to prevent the same consumer from reciving 2 items in a row
     }
     return itemsRecieved;
 }
@@ -174,6 +174,7 @@ void producer()
         memcpy(&hell->buffer, message, strlen(message) - offset);
         //memset(&hell->buffer, '?', s);
         itemsProduced++;
+        hell->bItems += 1;
         sem_post(&(hell->accessReady));
 
         //increase the amount of items available
