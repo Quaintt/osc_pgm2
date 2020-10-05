@@ -1,4 +1,4 @@
-# osc_pgm2
+## OS Concepts Programming Assignment 2
 
 ### Problem Statement
 The task was to create a C/C++ program that simulated the results and functionality of the sample program provided in figure 5.16 of the textbook. This would require a singular producer process to generate a total of one million items, which would be shared with ten consumer processes via a buffer with a size of 1000. Each of these processes must be created using fork and must utilize Linux semaphores to communicate. After running, each of the consumers must report the number of items they received, and all processes and semaphores must be properly cleaned up. This assignment tests the programmer’s knowledge of semaphore, fork, and memory sharing concepts.
